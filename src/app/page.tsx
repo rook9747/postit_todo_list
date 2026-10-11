@@ -475,12 +475,8 @@ export default function PostItTodoApp() {
       {/* 1. 최상단 헤더 */}
       <header className="sticky top-0 z-40 bg-[#F4F4F5]/90 dark:bg-[#121214]/90 backdrop-blur-md border-b border-stone-200/80 dark:border-zinc-800 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 relative flex items-center justify-between">
-          {/* 좌측 로고 아이콘 */}
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-2xl bg-amber-400 text-stone-900 flex items-center justify-center shadow-md shadow-amber-300/40 -rotate-3">
-              <StickyNote className="w-6 h-6 stroke-[2.2]" />
-            </div>
-          </div>
+          {/* 좌측 여백 균형용 빈 div */}
+          <div className="w-10 h-10" />
 
           {/* 최상단 중앙 제목 (Post-It To Do List) */}
           <div className="absolute left-1/2 -translate-x-1/2 text-center pointer-events-none">
