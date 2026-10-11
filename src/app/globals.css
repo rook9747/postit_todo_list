@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg-main: #f4f4f5;
+    --card-surface: #ffffff;
+    --text-primary: #18181b;
+  }
+
+  html.dark,
+  body.dark,
+  .dark {
+    --bg-main: #121214;
+    --card-surface: #1e1e24;
+    --text-primary: #f4f4f5;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* 다크모드 클래스 직접 보강 */
+.dark body {
+  background-color: #121214 !important;
+  color: #f4f4f5 !important;
+}
+
+.dark .bg-white {
+  background-color: #1e1e24 !important;
+}
+
+.dark .text-stone-900 {
+  color: #f4f4f5 !important;
+}
+
+.dark .border-stone-200 {
+  border-color: #27272a !important;
+}
+
+/* 포스트잇 착 붙는 애니메이션 */
+@keyframes stickPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.85) translateY(-24px) rotate(-3deg);
+  }
+  60% {
+    transform: scale(1.03) translateY(4px) rotate(1.5deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0) rotate(var(--rotation, 0deg));
+  }
+}
+
+.animate-stick {
+  animation: stickPop 0.42s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* 미세 종이 텍스처 패턴 */
+.note-texture {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 0);
+  background-size: 8px 8px;
+}
+
+.dark .note-texture {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 0);
+  background-size: 8px 8px;
 }
