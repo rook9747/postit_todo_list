@@ -173,17 +173,26 @@ export default function PostItTodoApp() {
       const result = await res.json();
 
       if (result.success && Array.isArray(result.data)) {
-        const loaded: NoteItem[] = result.data.map((item: any, idx: number) => ({
-          id: String(item.timestamp || `tmp-${idx}`),
-          timestamp: String(item.timestamp || Date.now()),
-          datetime: item.datetime || formatCurrentKoreanDateTime(),
-          category: (item.state || "할 일") as CategoryType,
-          content: item.content || "",
-          color: (COLOR_KEYS.includes(item.color) ? item.color : "yellow") as ColorTone,
-          state: (item.state || "할 일") as CategoryType,
-          order: typeof item.order === "number" ? item.order : idx,
-          rotation: getRandomRotation(),
-        }));
+        const loaded: NoteItem[] = result.data.map((item: any, idx: number) => {
+          const categoryVal = (item.category || item.state || "할 일") as CategoryType;
+          const colorVal = (COLOR_KEYS.includes(item.color) ? item.color : "yellow") as ColorTone;
+          const orderVal = typeof item.order === "number" && !isNaN(item.order) ? item.order : idx;
+
+          return {
+            id: String(item.timestamp || `tmp-${idx}`),
+            timestamp: String(item.timestamp || Date.now()),
+            datetime: item.datetime || formatCurrentKoreanDateTime(),
+            category: categoryVal,
+            content: item.content || "",
+            color: colorVal,
+            state: (item.state || categoryVal) as CategoryType,
+            order: orderVal,
+            rotation: getRandomRotation(),
+          };
+        });
+
+        // order 오름차순으로 정렬
+        loaded.sort((a, b) => a.order - b.order);
         setNotes(loaded);
       } else {
         throw new Error(result.error || "데이터를 불러오는 중 오류가 발생했습니다.");
@@ -213,10 +222,9 @@ export default function PostItTodoApp() {
     const clientTimestamp = String(Date.now());
     const formattedDatetime = formatCurrentKoreanDateTime();
     const randomColor = getRandomColor();
-    const newOrder = notes.length;
 
-    // 즉각적인 UI 반영 (Optimistic UI)
-    const tempNote: NoteItem = {
+    // 새 메모는 최상단(order: 0)에 위치하고 기존 메모들의 order는 1씩 증가
+    const newNote: NoteItem = {
       id: clientTimestamp,
       timestamp: clientTimestamp,
       datetime: formattedDatetime,
@@ -224,11 +232,16 @@ export default function PostItTodoApp() {
       content: trimmed,
       color: randomColor,
       state: selectedCategory,
-      order: newOrder,
+      order: 0,
       rotation: getRandomRotation(),
     };
 
-    setNotes((prev) => [tempNote, ...prev]);
+    const updatedNotes = [
+      newNote,
+      ...notes.map((n, i) => ({ ...n, order: i + 1 })),
+    ];
+
+    setNotes(updatedNotes);
     setInputText("");
     setJustAddedId(clientTimestamp);
 
@@ -245,7 +258,7 @@ export default function PostItTodoApp() {
             content: trimmed,
             color: randomColor,
             state: selectedCategory,
-            order: newOrder,
+            order: 0,
           },
         }),
       });
@@ -254,6 +267,9 @@ export default function PostItTodoApp() {
       if (!result.success) {
         throw new Error(result.error || "메모 저장에 실패했습니다.");
       }
+
+      // 기존 항목들의 순서가 1씩 밀렸으므로 전체 순서 동기화
+      syncOrderToServer(updatedNotes);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("구글 시트 저장 실패: " + err.message);

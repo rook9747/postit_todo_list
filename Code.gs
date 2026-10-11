@@ -3,35 +3,42 @@
  * Google Sheets 연동 Post-It To Do List CRUD Google Apps Script (GAS)
  * ==========================================================================
  * 
- * 스프레드시트 컬럼 구조:
- * A: timestamp (고유 식별자 ID 겸 생성 타임스탬프, 예: 1729750000000)
- * B: datetime  (포맷팅된 일시, 예: 2026.10.11 (일) 14:30)
- * C: content   (메모 내용)
- * D: color     (색상: yellow | pink | green | blue)
- * E: state     (카테고리/상태: 할 일 | 아이디어 | 기타)
- * F: order     (표시 순서 / 정렬 번호, 숫자)
+ * 구글 시트 정확한 열(Column) 구조 (총 7개 컬럼 A:G):
+ * A (col 1): timestamp (고유 식별자 ID, 숫자/문자열)
+ * B (col 2): datetime  (작성 일시, 예: 2026.10.11 (일) 14:30)
+ * C (col 3): category  (카테고리/범주: 할 일 | 아이디어 | 기타)
+ * D (col 4): content   (메모 내용 본문)
+ * E (col 5): color     (노랑/분홍/초록/파랑: yellow | pink | green | blue)
+ * F (col 6): state     (상태: 할 일 | 진행중 | 완료 등, 기본 카테고리와 연동)
+ * G (col 7): order     (정렬 순서 / 인덱스, 0, 1, 2, ...)
  * 
  * API Endpoints:
- * - GET: 목록 조회 (read)
- * - POST: 생성(create), 수정(update), 삭제(delete), 순서 업데이트(reorder)
+ * - GET: 목록 조회 (Read)
+ * - POST: 생성(create), 수정(update), 삭제(delete), 순서 동기화(reorder)
  */
 
-const SHEET_NAME = "Sheet1"; // 시트 탭 이름 (필요시 변경 가능)
+const SHEET_NAME = "Sheet1";
 
 /**
- * 시트 객체 및 헤더 보장 헬퍼 함수
+ * 시트 객체 및 7개 헤더 컬럼 검증/초기화 헬퍼 함수
  */
 function getTargetSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
-    sheet = ss.getSheets()[0]; // 첫 번째 시트 기본 사용
+    sheet = ss.getSheets()[0];
   }
 
-  // 헤더가 없을 경우 자동 초기화
+  // 헤더가 비어있거나 부족한 경우 7개 컬럼 헤더 자동 설정
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["timestamp", "datetime", "content", "color", "state", "order"]);
-    sheet.getRange(1, 1, 1, 6).setFontWeight("bold").setBackground("#F4F4F5");
+    sheet.appendRow(["timestamp", "datetime", "category", "content", "color", "state", "order"]);
+    sheet.getRange(1, 1, 1, 7).setFontWeight("bold").setBackground("#F4F4F5");
+  } else {
+    // 1행 1~7열 헤더 검증
+    const headers = sheet.getRange(1, 1, 1, 7).getValues()[0];
+    if (headers[2] !== "category" || headers[6] !== "order") {
+      sheet.getRange(1, 1, 1, 7).setValues([["timestamp", "datetime", "category", "content", "color", "state", "order"]]);
+    }
   }
 
   return sheet;
@@ -39,7 +46,7 @@ function getTargetSheet() {
 
 /**
  * 1. GET 요청: 전체 메모 목록 조회 (Read)
- * 요청 예시: GET https://script.google.com/macros/s/.../exec
+ * A:G 7개 컬럼을 정확한 필드명으로 매핑하여 반환
  */
 function doGet(e) {
   try {
@@ -47,23 +54,30 @@ function doGet(e) {
     const lastRow = sheet.getLastRow();
 
     if (lastRow <= 1) {
-      // 데이터가 헤더 외에 없는 경우 빈 배열 반환
       return createJsonResponse({ success: true, data: [] });
     }
 
-    // 2행부터 전체 데이터 읽기 (A:F)
-    const values = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+    // 2행부터 마지막 행까지 A열(1) ~ G열(7) 데이터 읽기
+    const values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
 
-    const data = values.map((row) => ({
-      timestamp: String(row[0] || ""),
-      datetime: String(row[1] || ""),
-      content: String(row[2] || ""),
-      color: String(row[3] || "yellow"),
-      state: String(row[4] || "할 일"),
-      order: Number(row[5]) || 0,
-    }));
+    const data = values.map((row, idx) => {
+      const orderVal = row[6];
+      const parsedOrder = (orderVal !== "" && orderVal !== null && !isNaN(Number(orderVal)))
+        ? Number(orderVal)
+        : idx;
 
-    // order 순서대로 오름차순 정렬
+      return {
+        timestamp: String(row[0] || ""),
+        datetime: String(row[1] || ""),
+        category: String(row[2] || "할 일"),
+        content: String(row[3] || ""),
+        color: String(row[4] || "yellow"),
+        state: String(row[5] || row[2] || "할 일"),
+        order: parsedOrder,
+      };
+    });
+
+    // order 기준 오름차순 정렬
     data.sort((a, b) => a.order - b.order);
 
     return createJsonResponse({ success: true, data: data });
@@ -74,18 +88,12 @@ function doGet(e) {
 
 /**
  * 2. POST 요청: 메모 생성(create), 수정(update), 삭제(delete), 순서변경(reorder)
- * 요청 payload: JSON 문자열
- * {
- *   "action": "create" | "update" | "delete" | "reorder",
- *   "data": { ... }
- * }
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  // 동시성 제어를 위해 10초간 대기
   try {
     lock.waitLock(10000);
-  } catch (e) {
+  } catch (err) {
     return createJsonResponse({ success: false, error: "서버가 혼잡합니다. 잠시 후 다시 시도해주세요." });
   }
 
@@ -104,27 +112,36 @@ function doPost(e) {
 
     switch (action) {
       case "create": {
-        // [C] Create: 새 포스트잇 추가
-        // payload: { timestamp, datetime, content, color, state, order }
+        // [C] Create: 새 포스트잇 생성
+        // payload: { timestamp, datetime, category, content, color, state, order }
         const timestamp = String(payload.timestamp || Date.now());
         const datetime = String(payload.datetime || "");
+        const category = String(payload.category || payload.state || "할 일");
         const content = String(payload.content || "");
         const color = String(payload.color || "yellow");
-        const state = String(payload.state || "할 일");
-        const order = Number(payload.order !== undefined ? payload.order : sheet.getLastRow());
+        const state = String(payload.state || category || "할 일");
+        
+        // order가 명시적으로 전달되지 않은 경우 현재 행 순서 기반 계산
+        let order = 0;
+        if (payload.order !== undefined && payload.order !== null && !isNaN(Number(payload.order))) {
+          order = Number(payload.order);
+        } else {
+          order = Math.max(0, sheet.getLastRow() - 1);
+        }
 
-        sheet.appendRow([timestamp, datetime, content, color, state, order]);
+        // A: timestamp, B: datetime, C: category, D: content, E: color, F: state, G: order
+        sheet.appendRow([timestamp, datetime, category, content, color, state, order]);
 
         return createJsonResponse({
           success: true,
           message: "포스트잇이 성공적으로 등록되었습니다.",
-          data: { timestamp, datetime, content, color, state, order },
+          data: { timestamp, datetime, category, content, color, state, order },
         });
       }
 
       case "update": {
         // [U] Update: 특정 timestamp의 메모 수정
-        // payload: { timestamp, content, state, color }
+        // payload: { timestamp, category, content, color, state }
         const timestamp = String(payload.timestamp);
         const lastRow = sheet.getLastRow();
         if (lastRow <= 1) {
@@ -136,20 +153,27 @@ function doPost(e) {
 
         for (let i = 0; i < timestamps.length; i++) {
           if (String(timestamps[i][0]) === timestamp) {
-            targetRowIndex = i + 2; // 실제 시트 행 번호
+            targetRowIndex = i + 2;
             break;
           }
         }
 
         if (targetRowIndex === -1) {
-          return createJsonResponse({ success: false, error: "해당 timestamp의 메모를 찾을 수 없습니다." });
+          return createJsonResponse({ success: false, error: "해당 timestamp의 메모를 찾을 수 없습니다: " + timestamp });
         }
 
-        // 선택적 업데이트
-        if (payload.content !== undefined) sheet.getRange(targetRowIndex, 3).setValue(payload.content);
-        if (payload.color !== undefined) sheet.getRange(targetRowIndex, 4).setValue(payload.color);
-        if (payload.state !== undefined) sheet.getRange(targetRowIndex, 5).setValue(payload.state);
+        // A(1): timestamp, B(2): datetime, C(3): category, D(4): content, E(5): color, F(6): state, G(7): order
         if (payload.datetime !== undefined) sheet.getRange(targetRowIndex, 2).setValue(payload.datetime);
+        if (payload.category !== undefined) {
+          sheet.getRange(targetRowIndex, 3).setValue(payload.category);
+          sheet.getRange(targetRowIndex, 6).setValue(payload.category); // state도 함께 동기화
+        }
+        if (payload.content !== undefined) sheet.getRange(targetRowIndex, 4).setValue(payload.content);
+        if (payload.color !== undefined) sheet.getRange(targetRowIndex, 5).setValue(payload.color);
+        if (payload.state !== undefined) sheet.getRange(targetRowIndex, 6).setValue(payload.state);
+        if (payload.order !== undefined && !isNaN(Number(payload.order))) {
+          sheet.getRange(targetRowIndex, 7).setValue(Number(payload.order));
+        }
 
         return createJsonResponse({
           success: true,
@@ -177,7 +201,7 @@ function doPost(e) {
         }
 
         if (targetRowIndex === -1) {
-          return createJsonResponse({ success: false, error: "해당 timestamp의 메모를 찾을 수 없습니다." });
+          return createJsonResponse({ success: false, error: "해당 timestamp의 메모를 찾을 수 없습니다: " + timestamp });
         }
 
         sheet.deleteRow(targetRowIndex);
@@ -189,7 +213,7 @@ function doPost(e) {
       }
 
       case "reorder": {
-        // [U] Reorder: 드래그 앤 드롭 정렬 순서 일괄 갱신
+        // [U] Reorder: 드래그 앤 드롭 순서(G열) 일괄 갱신
         // payload: [{ timestamp: "...", order: 0 }, { timestamp: "...", order: 1 }, ...]
         if (!Array.isArray(payload)) {
           return createJsonResponse({ success: false, error: "reorder 데이터는 배열이어야 합니다." });
@@ -200,18 +224,18 @@ function doPost(e) {
           return createJsonResponse({ success: true, message: "갱신할 메모가 없습니다." });
         }
 
-        const range = sheet.getRange(2, 1, lastRow - 1, 6);
+        const range = sheet.getRange(2, 1, lastRow - 1, 7);
         const rows = range.getValues();
 
         const orderMap = {};
         payload.forEach((item) => {
-          orderMap[String(item.timestamp)] = item.order;
+          orderMap[String(item.timestamp)] = Number(item.order);
         });
 
         for (let i = 0; i < rows.length; i++) {
           const rowTs = String(rows[i][0]);
           if (orderMap[rowTs] !== undefined) {
-            rows[i][5] = orderMap[rowTs]; // order 컬럼 (F열)
+            rows[i][6] = orderMap[rowTs]; // G열 (col 7, index 6)
           }
         }
 
@@ -219,7 +243,7 @@ function doPost(e) {
 
         return createJsonResponse({
           success: true,
-          message: "포스트잇 순서가 성공적으로 저장되었습니다.",
+          message: "포스트잇 순서(order)가 성공적으로 저장되었습니다.",
         });
       }
 
@@ -233,9 +257,6 @@ function doPost(e) {
   }
 }
 
-/**
- * JSON 응답 생성 헬퍼 함수 (CORS 허용)
- */
 function createJsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(
     ContentService.MimeType.JSON
